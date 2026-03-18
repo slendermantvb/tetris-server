@@ -2,8 +2,8 @@ FROM python:3.11-slim
 
 WORKDIR /main
 
-COPY main.py .
+COPY . .
 
-EXPOSE 5555
+RUN pip install websockets
 
 CMD ["python", "main.py"]
