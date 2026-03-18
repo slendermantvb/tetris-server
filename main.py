@@ -1,69 +1,44 @@
-import socket
-import threading
+import asyncio
+import websockets
 import json
-import time
 
-players = []
+players = set()
 leaderboard = {}
 
-def handle_client(conn, addr):
-    print("Jugador conectado:", addr)
+async def handler(websocket):
+    players.add(websocket)
 
     try:
-        name = conn.recv(1024).decode()
+        name = await websocket.recv()
         leaderboard.setdefault(name, 0)
-        players.append(conn)
 
-        while True:
-            data = conn.recv(4096)
-            if not data:
-                break
+        async for message in websocket:
+            data = json.loads(message)
 
-            msg = json.loads(data.decode())
+            if "score" in data:
+                leaderboard[name] = max(leaderboard[name], data["score"])
 
-            # actualizar score
-            if "score" in msg:
-                leaderboard[name] = max(leaderboard[name], msg["score"])
-
-            # reenviar a otros jugadores
+            # enviar a todos
             for p in players:
-                if p != conn:
-                    try:
-                        p.send(data)
-                    except:
-                        pass
+                if p != websocket:
+                    await p.send(message)
 
-    except Exception as e:
-        print("Error:", e)
+    except:
+        pass
 
-    print("Jugador desconectado:", addr)
-    if conn in players:
-        players.remove(conn)
-    conn.close()
+    players.remove(websocket)
 
 
-def broadcast_leaderboard():
+async def broadcast():
     while True:
-        try:
-            data = json.dumps({"leaderboard": leaderboard}).encode()
-            for p in players:
-                try:
-                    p.send(data)
-                except:
-                    pass
-            time.sleep(3)
-        except:
-            pass
+        if players:
+            data = json.dumps({"leaderboard": leaderboard})
+            await asyncio.gather(*[p.send(data) for p in players])
+        await asyncio.sleep(3)
 
 
-server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server.bind(("0.0.0.0", 5555))
-server.listen()
+async def main():
+    async with websockets.serve(handler, "0.0.0.0", 8000):
+        await broadcast()
 
-print("Servidor iniciado en puerto 5555...")
-
-threading.Thread(target=broadcast_leaderboard, daemon=True).start()
-
-while True:
-    conn, addr = server.accept()
-    threading.Thread(target=handle_client, args=(conn, addr), daemon=True).start()
+asyncio.run(main())
